@@ -1,0 +1,1437 @@
+/* ------------------------------------------------------------------
+   デザイントークン（Claude のチャット UI を参考にした温かみのある配色）
+
+   色・影・フォントはすべてここで CSS 変数として定義し、各部品は変数だけを参照する。
+   ダークモードでは下の @media で変数の値だけを差し替えるので、部品側の CSS は 1 通りで済む。
+
+   配色の考え方（Claude に合わせたもの）:
+   - 背景は真っ白ではなく、少し黄みのあるオフホワイト（#faf9f5）。長文を読んでも目が疲れにくい
+   - サイドバーは本文より一段暗く、境界線は 0.5px の半透明線で控えめに区切る
+   - アクセントはテラコッタ（#c96442）。送信ボタン・新しいチャット・選択状態にだけ使い、目立たせすぎない
+------------------------------------------------------------------ */
+:root {
+  --bg: #faf9f5;
+  --bg-sidebar: #f3f1ea;
+  --bg-elevated: #ffffff;
+  --bg-hover: rgba(31, 30, 29, 0.06);
+  --bg-active: rgba(31, 30, 29, 0.1);
+  --bg-user: #f0eee6;
+  --text: #1f1e1d;
+  --text-2: #5e5d59;
+  --text-3: #8b8a85;
+  --border: rgba(31, 30, 29, 0.13);
+  --border-strong: rgba(31, 30, 29, 0.22);
+  --accent: #c96442;
+  --accent-hover: #b4552f;
+  --accent-soft: rgba(201, 100, 66, 0.12);
+  --danger: #b3261e;
+  --danger-soft: rgba(179, 38, 30, 0.08);
+  --ok: #2e8b57;
+  --shadow-composer: 0 0.25rem 1.25rem rgba(0, 0, 0, 0.035), 0 0 0 0.5px rgba(31, 30, 29, 0.15);
+  --shadow-pop: 0 8px 28px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(31, 30, 29, 0.14);
+
+  /* フォントは OS に入っているものだけを使う（Web フォントを読み込まず、オフラインでも同じ見た目にするため）。
+     UI はゴシック体、訳文と見出しは明朝体（serif）。Claude も応答本文に serif を使っており、
+     「入力した原文」と「モデルが返した訳文」が書体でひと目で区別できる。 */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP",
+    "Yu Gothic UI", "Segoe UI", sans-serif;
+  --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP",
+    Georgia, serif;
+
+  color-scheme: light;
+}
+
+/* OS の設定がダークモードなら、変数の値だけを暗い配色に差し替える */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #262624;
+    --bg-sidebar: #1f1e1d;
+    --bg-elevated: #30302e;
+    --bg-hover: rgba(250, 249, 245, 0.06);
+    --bg-active: rgba(250, 249, 245, 0.1);
+    --bg-user: #141413;
+    --text: #f5f4ee;
+    --text-2: #c2c0b6;
+    --text-3: #9c9a92;
+    --border: rgba(250, 249, 245, 0.12);
+    --border-strong: rgba(250, 249, 245, 0.22);
+    --accent: #d97757;
+    --accent-hover: #e08a6d;
+    --accent-soft: rgba(217, 119, 87, 0.16);
+    --danger: #f2827a;
+    --danger-soft: rgba(242, 130, 122, 0.1);
+    --ok: #5cc28b;
+    --shadow-composer: 0 0.25rem 1.25rem rgba(0, 0, 0, 0.2), 0 0 0 0.5px rgba(250, 249, 245, 0.14);
+    --shadow-pop: 0 8px 28px rgba(0, 0, 0, 0.45), 0 0 0 0.5px rgba(250, 249, 245, 0.14);
+    color-scheme: dark;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: default;
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.muted {
+  color: var(--text-3);
+}
+
+/* ------------------------------------------------------------------
+   レイアウト
+------------------------------------------------------------------ */
+/* 画面全体を 1 画面の高さに固定し、ページ全体ではなく各領域（サイドバーの一覧・メッセージ一覧）をスクロールさせる。
+   100dvh はスマホのアドレスバーの伸び縮みを考慮した高さ（未対応ブラウザ向けに 100vh も書いておく）。 */
+.app {
+  display: flex;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+/* min-width: 0 がないと、長い単語や URL を含むメッセージで flex アイテムが縮めず、横にはみ出す */
+.main {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ------------------------------------------------------------------
+   共通パーツ
+------------------------------------------------------------------ */
+/* アイコンだけのボタン。普段は背景なしで、ホバー時だけ薄い背景を出す（Claude のツールバーと同じ控えめな表現） */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-2);
+  transition: background 0.12s, color 0.12s;
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.icon-btn:disabled {
+  opacity: 0.35;
+}
+
+.icon-btn.small {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+
+.icon-btn.bordered {
+  border: 0.5px solid var(--border-strong);
+}
+
+.icon-btn.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: transparent;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: 0.5px solid transparent;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background 0.12s, opacity 0.12s;
+  white-space: nowrap;
+}
+
+.btn.small {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.btn-primary {
+  background: var(--text);
+  color: var(--bg);
+}
+
+.btn-primary:hover {
+  opacity: 0.88;
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: var(--border-strong);
+}
+
+.btn-ghost:hover {
+  background: var(--bg-hover);
+}
+
+.btn-danger {
+  background: var(--danger);
+  color: #fff;
+}
+
+.btn-danger:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.btn:disabled {
+  opacity: 0.4;
+}
+
+.link-btn {
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 14px;
+  padding: 0;
+}
+
+.link-btn:hover {
+  text-decoration: underline;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 5px;
+  background: var(--bg-hover);
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+.hint {
+  display: block;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13.5px;
+}
+
+.banner.top {
+  margin: 10px auto 0;
+  width: min(760px, calc(100% - 32px));
+  z-index: 5;
+}
+
+.banner.warn {
+  background: var(--accent-soft);
+  color: var(--text);
+  border: 0.5px solid rgba(201, 100, 66, 0.3);
+}
+
+.banner.error {
+  margin-top: 12px;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.center-message {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--text-2);
+}
+
+/* フォーム */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.field-label {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.field select,
+.field textarea {
+  width: 100%;
+  border: 0.5px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg);
+  padding: 7px 10px;
+  font-size: 14px;
+  outline: none;
+}
+
+.field textarea {
+  resize: vertical;
+  min-height: 64px;
+  line-height: 1.5;
+}
+
+.field select:focus,
+.field textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.field select:disabled {
+  opacity: 0.5;
+}
+
+/* チェックボックスを iOS 風のスイッチに見せる。appearance: none で標準の見た目を消し、::after でつまみを描く。
+   中身は本物のチェックボックスなので、キーボード操作や読み上げはそのまま使える。 */
+.switch {
+  appearance: none;
+  flex-shrink: 0;
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  cursor: pointer;
+  transition: background 0.15s;
+  margin: 0;
+}
+
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.switch:checked {
+  background: var(--accent);
+}
+
+.switch:checked::after {
+  transform: translateX(16px);
+}
+
+/* ------------------------------------------------------------------
+   ポップオーバー / メニュー
+------------------------------------------------------------------ */
+.popover-anchor {
+  position: relative;
+  display: inline-flex;
+}
+
+/* ポップオーバー本体。位置は .popover-anchor（position: relative）を基準に、上下・左右のクラスで決める */
+.popover {
+  position: absolute;
+  z-index: 50;
+  min-width: 200px;
+  background: var(--bg-elevated);
+  border-radius: 12px;
+  box-shadow: var(--shadow-pop);
+  padding: 6px;
+  animation: pop-in 0.12s ease-out;
+}
+
+.popover-top {
+  bottom: calc(100% + 8px);
+}
+
+.popover-bottom {
+  top: calc(100% + 6px);
+}
+
+.popover-left {
+  left: 0;
+}
+
+.popover-right {
+  right: 0;
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+}
+
+.menu {
+  display: flex;
+  flex-direction: column;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.menu.compact {
+  min-width: 160px;
+}
+
+.menu-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px 6px 10px;
+  font-size: 12px;
+  color: var(--text-3);
+  font-weight: 600;
+}
+
+.menu-error {
+  margin: 0 6px 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  padding: 8px 10px;
+  text-align: left;
+  font-size: 14px;
+}
+
+.menu-item:hover {
+  background: var(--bg-hover);
+}
+
+.menu-item.danger {
+  color: var(--danger);
+}
+
+.menu-item svg:last-child:not(:first-child) {
+  margin-left: auto;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.menu-item-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.menu-item-text > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-sub {
+  font-size: 12px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-popover {
+  width: 320px;
+}
+
+/* ------------------------------------------------------------------
+   モーダル
+------------------------------------------------------------------ */
+/* 確認ダイアログの背景。position: fixed で画面全体を覆い、下の操作を受け付けないようにする */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: fade-in 0.12s ease-out;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.modal {
+  width: min(440px, 100%);
+  background: var(--bg-elevated);
+  border-radius: 16px;
+  box-shadow: var(--shadow-pop);
+  padding: 22px 22px 18px;
+}
+
+.modal-title {
+  margin: 0 0 8px;
+  font-family: var(--font-serif);
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.modal-message {
+  margin: 0 0 20px;
+  color: var(--text-2);
+  font-size: 14px;
+  word-break: break-word;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ------------------------------------------------------------------
+   サイドバー
+------------------------------------------------------------------ */
+/* サイドバー。幅を transition で変えて、折りたたみをアニメーションさせる。
+   overflow: hidden で、縮む途中に文字がはみ出して見えないようにする。 */
+.sidebar {
+  flex-shrink: 0;
+  width: 288px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-sidebar);
+  border-right: 0.5px solid var(--border);
+  transition: width 0.18s ease;
+  overflow: hidden;
+}
+
+.sidebar.collapsed {
+  width: 56px;
+}
+
+.sidebar-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 52px;
+  padding: 0 12px;
+  flex-shrink: 0;
+}
+
+.brand {
+  font-family: var(--font-serif);
+  font-size: 19px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 8px 8px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 8px;
+  border-radius: 8px;
+  color: var(--text-2);
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.nav-item:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.nav-item.active:not(.new-chat) {
+  background: var(--bg-active);
+  color: var(--text);
+}
+
+.new-chat {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.new-chat:hover {
+  color: var(--accent);
+}
+
+.new-chat-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  flex-shrink: 0;
+  transition: transform 0.15s;
+}
+
+.new-chat:hover .new-chat-icon {
+  transform: scale(1.06) rotate(90deg);
+}
+
+.sidebar.collapsed .nav-item {
+  justify-content: center;
+  padding: 0;
+}
+
+.sidebar-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 8px 12px;
+}
+
+.sidebar-section-title {
+  padding: 14px 8px 4px;
+  font-size: 12px;
+  color: var(--text-3);
+  font-weight: 500;
+}
+
+.sidebar-empty {
+  padding: 16px 8px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+.chat-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-radius: 8px;
+}
+
+/* 「…」メニューを開いている間は、マウスが行から外れても行の強調を保つ（:has で子の状態を見る） */
+.chat-item:hover,
+.chat-item:has(.chat-item-menu.open) {
+  background: var(--bg-hover);
+}
+
+.chat-item.active {
+  background: var(--bg-active);
+}
+
+.chat-item-link {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  font-size: 13.5px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-2);
+}
+
+.chat-item.active .chat-item-link,
+.chat-item:hover .chat-item-link {
+  color: var(--text);
+}
+
+/* 「…」ボタンはふだん隠し、行にマウスを乗せたとき・選択中の行・メニューを開いているときだけ出す。
+   display: none ではなく opacity で隠すのは、出し入れでタイトルの幅が変わってガタつかないようにするため。 */
+.chat-item-menu {
+  opacity: 0;
+  margin-right: 2px;
+}
+
+.chat-item:hover .chat-item-menu,
+.chat-item-menu.open,
+.chat-item.active .chat-item-menu {
+  opacity: 1;
+}
+
+.chat-item.renaming {
+  padding: 2px 0;
+}
+
+.rename-input {
+  width: 100%;
+  border: 0.5px solid var(--accent);
+  border-radius: 7px;
+  padding: 5px 8px;
+  background: var(--bg-elevated);
+  font-size: 13.5px;
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.rename-input.header {
+  width: min(420px, 60vw);
+  font-size: 14px;
+}
+
+.sidebar-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-top: 0.5px solid var(--border);
+  flex-shrink: 0;
+}
+
+.sidebar.collapsed .sidebar-footer {
+  padding: 12px 15px;
+}
+
+.footer-text {
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.footer-title {
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.footer-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.status-dot.ok {
+  background: var(--ok);
+}
+
+.status-dot.ng {
+  background: var(--danger);
+}
+
+.mobile-menu {
+  display: none;
+}
+
+.sidebar-backdrop {
+  display: none;
+}
+
+/* ------------------------------------------------------------------
+   ホーム（新しいチャット）
+------------------------------------------------------------------ */
+.home {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  justify-content: center;
+  padding: 0 16px;
+}
+
+.home-inner {
+  width: min(680px, 100%);
+  padding-top: max(14vh, 64px);
+  padding-bottom: 48px;
+}
+
+.home-greeting {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin: 0 0 6px;
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: clamp(30px, 5vw, 40px);
+  letter-spacing: -0.015em;
+  color: var(--text);
+}
+
+.home-sub {
+  text-align: center;
+  color: var(--text-3);
+  margin: 0 0 28px;
+  font-size: 14.5px;
+}
+
+.presets {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.preset {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 0.5px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 13px;
+  transition: background 0.12s, color 0.12s;
+}
+
+.preset:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.preset.active {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent);
+}
+
+/* ------------------------------------------------------------------
+   コンポーザー（入力欄）
+------------------------------------------------------------------ */
+/* 入力欄。白い角丸の箱に、ごく薄い影と 0.5px の輪郭線を重ねて、背景から少し浮かせる（Claude の入力欄の表現） */
+.composer {
+  background: var(--bg-elevated);
+  border-radius: 20px;
+  box-shadow: var(--shadow-composer);
+  padding: 14px 14px 10px;
+  transition: box-shadow 0.15s;
+}
+
+.composer:focus-within {
+  box-shadow: 0 0.25rem 1.25rem rgba(0, 0, 0, 0.05), 0 0 0 0.5px var(--border-strong);
+}
+
+/* textarea 自体は枠も背景も消し、外側の .composer を入力欄に見せる。高さは JS で中身に合わせる（Composer.tsx） */
+.composer-input {
+  display: block;
+  width: 100%;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  font-size: 16px;
+  line-height: 1.55;
+  padding: 2px 4px 10px;
+  max-height: 320px;
+  min-height: 28px;
+}
+
+.composer-input::placeholder {
+  color: var(--text-3);
+}
+
+.composer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.composer-left,
+.composer-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 0.5px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 13px;
+  white-space: nowrap;
+  transition: background 0.12s;
+}
+
+.chip:hover,
+.chip.active {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.chip.ghost {
+  border-color: transparent;
+}
+
+.model-label {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.send-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  flex-shrink: 0;
+  transition: background 0.12s, opacity 0.12s;
+}
+
+.send-btn:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.send-btn:disabled {
+  opacity: 0.4;
+}
+
+.lang-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 280px;
+  padding: 8px;
+}
+
+.swap-btn {
+  align-self: center;
+  transform: rotate(90deg);
+}
+
+.settings-popover {
+  width: 320px;
+}
+
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 8px;
+}
+
+.settings-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+}
+
+/* ------------------------------------------------------------------
+   個別チャット
+------------------------------------------------------------------ */
+.chat-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-header {
+  display: flex;
+  align-items: center;
+  height: 52px;
+  padding: 0 16px;
+  flex-shrink: 0;
+  border-bottom: 0.5px solid transparent;
+}
+
+.title-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: min(560px, 70vw);
+  height: 32px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.title-btn:hover,
+.title-btn.active {
+  background: var(--bg-hover);
+}
+
+.title-btn svg {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+
+.title-text {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* scrollbar-gutter: stable … スクロールバーが出たり消えたりしても、本文の横位置がずれないようにする */
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.messages-inner {
+  max-width: 768px;
+  margin: 0 auto;
+  padding: 16px 24px 32px;
+}
+
+.empty-chat {
+  text-align: center;
+  color: var(--text-3);
+  padding-top: 20vh;
+}
+
+.msg-row {
+  margin: 0 0 24px;
+}
+
+.msg-row.user {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* 原文の吹き出し。pre-wrap で改行や連続した空白を入力どおりに表示し、break-word で長い URL を折り返す */
+.user-bubble {
+  max-width: min(85%, 600px);
+  background: var(--bg-user);
+  border-radius: 16px;
+  padding: 10px 16px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.msg-row.assistant {
+  padding: 0 4px;
+}
+
+.msg-meta {
+  font-size: 12px;
+  color: var(--text-3);
+  margin-bottom: 4px;
+}
+
+/* 訳文。明朝体でやや大きめ・行間広め。Markdown として解釈せず、pre-wrap で改行をそのまま表示する */
+.assistant-text {
+  font-family: var(--font-serif);
+  font-size: 16.5px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+
+.cursor {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-left: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+}
+
+.thinking {
+  display: inline-flex;
+  gap: 5px;
+  padding: 10px 0;
+}
+
+.thinking span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: bounce 1.2s ease-in-out infinite;
+}
+
+.thinking span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.thinking span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes bounce {
+  0%,
+  80%,
+  100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-4px);
+  }
+}
+
+.msg-error {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 13.5px;
+  white-space: pre-wrap;
+}
+
+/* 訳文の下の操作ボタン（コピー・再翻訳など）。最後の訳文では常に、それ以外はホバーしたときだけ表示する。
+   min-height で領域を確保しておき、表示を切り替えてもレイアウトが上下に動かないようにする。 */
+.msg-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  margin-left: -6px;
+  min-height: 28px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.msg-row.assistant:hover .msg-actions,
+.msg-row.assistant.last .msg-actions {
+  opacity: 1;
+}
+
+.msg-model {
+  margin-left: 6px;
+  font-size: 11.5px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* チャット画面下部の入力欄の置き場所。上端を背景色へのグラデーションにして、
+   スクロールしたメッセージが入力欄の下へ自然に消えていくように見せる。 */
+.composer-dock {
+  flex-shrink: 0;
+  width: 100%;
+  max-width: 768px;
+  margin: 0 auto;
+  padding: 0 16px 10px;
+  background: linear-gradient(to bottom, transparent, var(--bg) 18px);
+}
+
+.disclaimer {
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--text-3);
+  padding-top: 8px;
+}
+
+/* ------------------------------------------------------------------
+   チャット一覧ページ
+------------------------------------------------------------------ */
+.page {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 16px;
+}
+
+.page-inner {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 48px 0 64px;
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.page-title {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: 30px;
+  letter-spacing: -0.01em;
+}
+
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 12px;
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-composer);
+  color: var(--text-3);
+}
+
+.search-box:focus-within {
+  box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft);
+}
+
+.search-box input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 15px;
+  color: var(--text);
+}
+
+.list-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  margin: 16px 0 4px;
+  font-size: 14px;
+}
+
+.select-all {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.toolbar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.chat-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 0.5px solid var(--border);
+}
+
+.chat-list-empty {
+  padding: 40px 0;
+  text-align: center;
+  color: var(--text-3);
+}
+
+.chat-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 8px;
+  border-bottom: 0.5px solid var(--border);
+  border-radius: 0;
+  transition: background 0.1s;
+}
+
+.chat-row:hover {
+  background: var(--bg-hover);
+}
+
+.chat-row.selected {
+  background: var(--accent-soft);
+}
+
+.chat-row input[type="checkbox"],
+.select-all input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  margin: 0;
+  cursor: pointer;
+}
+
+.chat-row-link {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 4px;
+}
+
+.chat-row-title {
+  font-size: 15px;
+  font-weight: 500;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.chat-row-meta {
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+
+.row-delete {
+  opacity: 0;
+}
+
+.chat-row:hover .row-delete {
+  opacity: 1;
+}
+
+.row-delete:hover {
+  color: var(--danger) !important;
+}
+
+/* ------------------------------------------------------------------
+   モバイル
+------------------------------------------------------------------ */
+/* 幅 768px 以下（スマホ・小さいタブレット）では、サイドバーを画面の左外に隠し、
+   メニューボタンで画面の上に重なって出てくるドロワーにする。
+   ホバーできない端末が多いので、ホバー時だけ出していたボタンは常に表示する。 */
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 60;
+    width: 288px !important;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    box-shadow: var(--shadow-pop);
+  }
+
+  .sidebar.mobile-open {
+    transform: none;
+  }
+
+  .sidebar.collapsed .nav-item {
+    justify-content: flex-start;
+    padding: 0 8px;
+  }
+
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    background: rgba(0, 0, 0, 0.3);
+  }
+
+  .mobile-menu {
+    display: inline-flex;
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 10;
+  }
+
+  .chat-header {
+    padding-left: 52px;
+  }
+
+  .messages-inner {
+    padding: 12px 16px 24px;
+  }
+
+  .home-inner {
+    padding-top: 72px;
+  }
+
+  .page-inner {
+    padding-top: 56px;
+  }
+
+  .model-label {
+    max-width: 110px;
+  }
+
+  .model-popover,
+  .settings-popover {
+    width: min(320px, calc(100vw - 32px));
+  }
+
+  .row-delete,
+  .chat-item-menu,
+  .msg-actions {
+    opacity: 1;
+  }
+}

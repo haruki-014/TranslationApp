@@ -1,0 +1,89 @@
+# アプリ全体の構成。
+#
+#   ブラウザ ──▶ frontend (nginx :80 → ホストの 127.0.0.1:3000)
+#                  ├─ 画面（React のビルド結果）を配信
+#                  └─ /api/* ──▶ backend (FastAPI :8000)
+#                                   ├─▶ db     (PostgreSQL) … チャット・メッセージ
+#                                   ├─▶ redis  (Redis)      … 一覧・モデル一覧・翻訳結果のキャッシュ
+#                                   └─▶ ホストのモデルサーバー（host.docker.internal）
+#                                         MLX 版 PLaMo: mlx-server/start.sh → :8001
+#                                         LM Studio   : → :1234
+#
+# モデルサーバーだけ Docker の外（Mac 本体）で動かしているのは、
+# Apple Silicon の GPU（Metal）を使う MLX は Docker のコンテナ内からは使えないため。
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      # 個人用アプリなので固定の資格情報にしている。ポートはホストに公開しておらず、
+      # 同じ Compose ネットワーク内の backend からしか接続できない。
+      POSTGRES_USER: plamo
+      POSTGRES_PASSWORD: plamo
+      POSTGRES_DB: plamo
+    volumes:
+      # 名前付きボリュームに保存し、コンテナを作り直してもチャット履歴が消えないようにする
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # 「接続を受け付けられる状態か」を確認する。backend はこれが通るまで起動を待つ。
+      test: ["CMD-SHELL", "pg_isready -U plamo -d plamo"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    # appendonly: 書き込みをディスクにも記録し、再起動後もキャッシュを残す（翻訳キャッシュの温存）
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    environment:
+      # ホスト名 db / redis は、Compose が作るネットワーク内でサービス名として解決される
+      DATABASE_URL: postgresql+asyncpg://plamo:plamo@db:5432/plamo
+      REDIS_URL: redis://redis:6379/0
+      # モデルサーバーはホスト側（Mac）で動かす（MLX: mlx-server/start.sh → 8001 / LM Studio → 1234）
+      # 以下の ${変数:-既定値} は .env の値で上書きできる
+      LMSTUDIO_BASE_URL: ${LMSTUDIO_BASE_URL:-http://host.docker.internal:8001/v1}
+      DEFAULT_MODEL: ${DEFAULT_MODEL:-}
+      MAX_TOKENS: ${MAX_TOKENS:-2048}
+      TEMPERATURE: ${TEMPERATURE:-0}
+      HISTORY_PAIRS: ${HISTORY_PAIRS:-4}
+      PLAMO_ADD_BOS: ${PLAMO_ADD_BOS:-false}
+    extra_hosts:
+      # host.docker.internal を「ホスト（Mac）」に向ける。
+      # Docker Desktop for Mac では元から使える名前だが、Linux の Docker でも同じ設定で動くように明示している。
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      # DB と Redis が healthcheck に通ってから起動する（起動直後の接続エラーを避ける）
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      # 127.0.0.1 にだけ公開し、同じネットワーク（LAN）の他の端末からは API に触れないようにする。
+      # 通常は nginx 経由で使うので、この公開は API を直接確認したいとき用。
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - backend
+    ports:
+      # こちらも 127.0.0.1 だけに公開する（この Mac のブラウザからだけ使う想定）
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:80"
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
